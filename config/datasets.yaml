@@ -1,0 +1,34 @@
+datasets:
+  top-gainers-losers:
+    landing_url: https://www.nseindia.com/market-data/top-gainers-losers
+    requests:
+      - api_url: https://www.nseindia.com/api/live-analysis-variations?index=gainers
+        category: gainer
+      - api_url: https://www.nseindia.com/api/live-analysis-variations?index=loosers
+        category: loser
+    records_path: allSec.data
+    expected_columns: [symbol, ltp, perChange]
+    natural_key: [symbol, category]
+  upper-band-hitters:
+    landing_url: https://www.nseindia.com/market-data/upper-band-hitters
+    api_url: https://www.nseindia.com/api/live-analysis-price-band-hitter
+    records_path: upper.AllSec.data
+    expected_columns: [symbol, ltp, pChange]
+    natural_key: symbol
+  volume-gainers-spurts:
+    landing_url: https://www.nseindia.com/market-data/volume-gainers-spurts
+    api_url: https://www.nseindia.com/api/live-analysis-volume-gainers
+    records_path: data
+    expected_columns: [symbol, ltp, volume]
+    natural_key: symbol
+  52-week-high:
+    landing_url: https://www.nseindia.com/market-data/52-week-high-equity-market
+    api_url: https://www.nseindia.com/api/live-analysis-data-52weekhighstock
+    records_path: data
+    expected_columns: [symbol, ltp, pChange]
+    natural_key: symbol
+settings:
+  request_timeout_seconds: 30
+  max_retries: 3
+  rate_limit_seconds: 0.25
+  user_agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36

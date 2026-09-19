@@ -1,0 +1,5 @@
+pytest>=8,<9
+pytest-cov>=5,<7
+ruff>=0.6,<0.7
+mypy>=1.11,<1.12
+types-PyYAML>=6.0,<7
