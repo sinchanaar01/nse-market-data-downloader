@@ -1,6 +1,7 @@
 datasets:
   top-gainers-losers:
     landing_url: https://www.nseindia.com/market-data/top-gainers-losers
+    api_url: https://www.nseindia.com/api/live-analysis-variations?index=gainers
     requests:
       - api_url: https://www.nseindia.com/api/live-analysis-variations?index=gainers
         category: gainer

@@ -10,7 +10,7 @@ import pytest
 from src.nse_downloader.acquisition import AcquisitionError, NSEClient, fetch_all
 from src.nse_downloader.config import DatasetConfig, Settings
 from src.nse_downloader.storage import sha256_file, write_csv, write_manifest, write_parquet, write_sqlite
-from src.nse_downloader.validation import DataValidationError, validate_records
+from src.nse_downloader.validation import DataValidationError, validate_records, validate_records_with_stats
 
 
 def test_bootstrap_and_fetch_success() -> None:
@@ -113,6 +113,66 @@ def test_sqlite_same_day_rerun_replaces_natural_key(tmp_path) -> None:
     with closing(sqlite3.connect(database)) as connection:
         rows = connection.execute('SELECT trading_date, symbol, price FROM data_demo').fetchall()
     assert rows == [("2026-09-18", "ABC", "2")]
+
+
+def test_validation_counts_invalid_and_duplicates_separately() -> None:
+    result = validate_records_with_stats(
+        {"data": [{"symbol": "AAA", "ltp": 10, "pChange": 1.5}, {"symbol": "AAA", "ltp": 12, "pChange": 2.0}, {"symbol": "BBB", "ltp": "bad", "pChange": 1.0}]},
+        ["symbol", "ltp", "pChange"],
+        "symbol",
+        dataset_name="52-week-high",
+    )
+    assert result.records_received == 3
+    assert result.invalid_records == 1
+    assert result.duplicates_dropped == 1
+    assert result.records_accepted == 1
+    assert result.records_valid == 2
+    assert [row["symbol"] for row in result.records] == ["AAA"]
+
+
+def test_validation_duplicate_only_rows_are_counted_correctly() -> None:
+    result = validate_records_with_stats(
+        {"data": [{"symbol": "AAA", "ltp": 10, "pChange": 1.5}, {"symbol": "AAA", "ltp": 11, "pChange": 2.0}, {"symbol": "BBB", "ltp": 8, "pChange": -1.0}]},
+        ["symbol", "ltp", "pChange"],
+        "symbol",
+        dataset_name="52-week-high",
+    )
+    assert result.records_received == 3
+    assert result.invalid_records == 0
+    assert result.duplicates_dropped == 1
+    assert result.records_accepted == 2
+    assert result.records_valid == 3
+
+
+def test_validation_counts_multiple_invalids_and_duplicates() -> None:
+    result = validate_records_with_stats(
+        {"data": [
+            {"symbol": "AAA", "ltp": 10, "pChange": 1.5},
+            {"symbol": "AAA", "ltp": 11, "pChange": 2.0},
+            {"symbol": "BBB", "ltp": "bad", "pChange": 1.0},
+            {"symbol": "CCC", "ltp": 9, "pChange": 0.3},
+            {"symbol": "CCC", "ltp": 9.5, "pChange": 0.4},
+            {"symbol": "DDD", "ltp": "oops", "pChange": 0.5},
+        ]},
+        ["symbol", "ltp", "pChange"],
+        "symbol",
+        dataset_name="52-week-high",
+    )
+    assert result.records_received == 6
+    assert result.invalid_records == 2
+    assert result.duplicates_dropped == 2
+    assert result.records_accepted == 2
+    assert result.records_valid == 4
+
+
+def test_validation_raises_when_all_rows_are_invalid() -> None:
+    with pytest.raises(DataValidationError, match="failed|natural key|no records remained"):
+        validate_records_with_stats(
+            {"data": [{"symbol": "BBB", "ltp": "bad", "pChange": 1.0}, {"symbol": "CCC", "ltp": "still-bad", "pChange": 2.0}]},
+            ["symbol", "ltp", "pChange"],
+            "symbol",
+            dataset_name="52-week-high",
+        )
 
 
 def test_failed_request_is_reported_without_raising_to_caller() -> None:

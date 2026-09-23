@@ -14,7 +14,10 @@ class DataValidationError(ValueError):
 class ValidationResult:
     records: list[dict[str, Any]]
     records_received: int
+    records_valid: int
+    invalid_records: int
     duplicates_dropped: int
+    records_accepted: int
 
 
 class DatasetRow(BaseModel):
@@ -117,6 +120,7 @@ def validate_records_with_stats(
     records_with_categories: list[tuple[dict[str, Any], str | None]] = []
     for request_payload, category in payloads:
         records_with_categories.extend((row, category) for row in extract_records(request_payload, records_path))
+
     records = [row for row, _ in records_with_categories]
     expected = list(expected_columns)
     natural_keys = [natural_key] if isinstance(natural_key, str) else natural_key
@@ -127,42 +131,73 @@ def validate_records_with_stats(
         contract = DatasetRow
     else:
         contract = cast(type[DatasetRow], CONTRACTS.get(dataset_name, DatasetRow))
+
     seen: set[tuple[str, ...]] = set()
-    valid: list[dict[str, Any]] = []
+    accepted: list[dict[str, Any]] = []
+    duplicates_dropped = 0
+    invalid_records = 0
     dropped_reasons: list[str] = []
+
     for index, (source_row, category) in enumerate(records_with_categories):
         row = dict(source_row)
         if category is not None:
             row["category"] = category
         elif dataset_name == "top-gainers-losers" and "category" in natural_keys:
             row["category"] = "gainer"
+
         missing_columns = [column for column in expected if column not in row]
         missing_keys = [key for key in natural_keys if key not in row]
         if missing_columns or missing_keys:
+            invalid_records += 1
             dropped_reasons.append(f"missing expected columns or natural key at record {index}")
-            logger.warning("dropping malformed row", extra={"context": {"record_index": index, "missing_columns": missing_columns, "missing_natural_keys": missing_keys}})
+            logger.warning(
+                "dropping malformed row",
+                extra={"context": {"record_index": index, "missing_columns": missing_columns, "missing_natural_keys": missing_keys}},
+            )
             continue
+
         key_values = [row[key] for key in natural_keys]
         if any(isinstance(value, (dict, list, tuple, set)) for value in key_values):
+            invalid_records += 1
             dropped_reasons.append(f"natural key '{', '.join(natural_keys)}' must be scalar")
             logger.warning("dropping malformed row", extra={"context": {"record_index": index, "reason": "natural key must be scalar"}})
             continue
+
         try:
             model = contract.model_validate(row)
         except ValidationError as exc:
+            invalid_records += 1
             dropped_reasons.append(f"record {index} failed {contract.__name__}: {exc}")
             logger.warning("dropping malformed row", extra={"context": {"record_index": index, "error": str(exc)}})
             continue
+
         key = tuple(str(value).strip() for value in key_values)
         if any(not value for value in key):
+            invalid_records += 1
             dropped_reasons.append(f"natural key '{', '.join(natural_keys)}' must not be empty")
             logger.warning("dropping malformed row", extra={"context": {"record_index": index, "reason": "natural key must not be empty"}})
             continue
-        if key not in seen:
-            seen.add(key)
-            valid.append(model.model_dump(mode="python", exclude_none=True))
-    if not valid:
-        if records and all(any(key not in row for key in natural_keys) for row in records):
+
+        if key in seen:
+            duplicates_dropped += 1
+            continue
+
+        seen.add(key)
+        accepted.append(model.model_dump(mode="python", exclude_none=True))
+
+    records_received = len(records)
+    records_valid = len(accepted) + duplicates_dropped
+    records_accepted = len(accepted)
+    if records_received and records_valid == 0:
+        if any(key not in row for key in natural_keys for row in records):
             raise DataValidationError(f"all records are missing natural key '{', '.join(natural_keys)}'")
         raise DataValidationError(dropped_reasons[0] if dropped_reasons else "no records remained after validation")
-    return ValidationResult(valid, len(records), len(records) - len(valid))
+
+    return ValidationResult(
+        records=accepted,
+        records_received=records_received,
+        records_valid=records_valid,
+        invalid_records=invalid_records,
+        duplicates_dropped=duplicates_dropped,
+        records_accepted=records_accepted,
+    )

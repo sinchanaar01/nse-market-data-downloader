@@ -35,7 +35,22 @@ async def run(args: argparse.Namespace) -> int:
         optional_sqlite_status = "not_enabled" if not args.sqlite else "not_attempted"
         if error:
             failures += 1
-            results[name] = {"success": False, "records_received": 0, "records_accepted": 0, "duplicates_dropped": 0, "record_count": 0, "csv_write_status": "not_attempted", "parquet_write_status": "not_attempted", "sqlite_write_status": optional_sqlite_status, "retry_count": retry_count, "duration_seconds": duration, "error": str(error), "files": {}}
+            results[name] = {
+                "success": False,
+                "records_received": 0,
+                "records_valid": 0,
+                "invalid_records": 0,
+                "duplicates_dropped": 0,
+                "records_accepted": 0,
+                "record_count": 0,
+                "csv_write_status": "not_attempted",
+                "parquet_write_status": "not_attempted",
+                "sqlite_write_status": optional_sqlite_status,
+                "retry_count": retry_count,
+                "duration_seconds": duration,
+                "error": str(error),
+                "files": {},
+            }
             logger.error("dataset failed", extra={"context": {"dataset": name, "success": False, "record_count": 0, "error": str(error)}})
             return
         try:
@@ -75,8 +90,10 @@ async def run(args: argparse.Namespace) -> int:
             results[name] = {
                 "success": True,
                 "records_received": validation.records_received,
-                "records_accepted": validation.records_received - validation.duplicates_dropped,
+                "records_valid": validation.records_valid,
+                "invalid_records": validation.invalid_records,
                 "duplicates_dropped": validation.duplicates_dropped,
+                "records_accepted": validation.records_accepted,
                 "record_count": len(records),
                 "csv_write_status": "success",
                 "parquet_write_status": "success" if parquet_path is not None and parquet_hash_error is None else f"failed: {parquet_error or parquet_hash_error}",
@@ -86,10 +103,40 @@ async def run(args: argparse.Namespace) -> int:
                 "error": None,
                 "files": files,
             }
-            logger.info("dataset downloaded", extra={"context": {"dataset": name, "success": True, "record_count": len(records), "path": str(csv_path)}})
+            logger.info(
+                "dataset downloaded",
+                extra={
+                    "context": {
+                        "dataset": name,
+                        "success": True,
+                        "records_received": validation.records_received,
+                        "records_valid": validation.records_valid,
+                        "invalid_records": validation.invalid_records,
+                        "duplicates_dropped": validation.duplicates_dropped,
+                        "records_accepted": validation.records_accepted,
+                        "record_count": len(records),
+                        "path": str(csv_path),
+                    }
+                },
+            )
         except Exception as exc:
             failures += 1
-            results[name] = {"success": False, "records_received": 0, "records_accepted": 0, "duplicates_dropped": 0, "record_count": 0, "csv_write_status": "failed", "parquet_write_status": "not_attempted", "sqlite_write_status": optional_sqlite_status, "retry_count": retry_count, "duration_seconds": duration, "error": str(exc), "files": {}}
+            results[name] = {
+                "success": False,
+                "records_received": 0,
+                "records_valid": 0,
+                "invalid_records": 0,
+                "duplicates_dropped": 0,
+                "records_accepted": 0,
+                "record_count": 0,
+                "csv_write_status": "failed",
+                "parquet_write_status": "not_attempted",
+                "sqlite_write_status": optional_sqlite_status,
+                "retry_count": retry_count,
+                "duration_seconds": duration,
+                "error": str(exc),
+                "files": {},
+            }
             logger.error("dataset rejected", extra={"context": {"dataset": name, "success": False, "record_count": 0, "error": str(exc)}})
 
     client = NSEClient(config.settings, logger=logger)
